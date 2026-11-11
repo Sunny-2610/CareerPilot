@@ -43,40 +43,97 @@ def log_action(
     db.commit()
 
 
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+GROQ_MODELS_DEFAULT = "openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b"
+OPENROUTER_MODELS_DEFAULT = "google/gemini-2.5-flash,nvidia/nemotron-3.5-lightning:free"
+
+
+def _env_models(env_var: str, default: str) -> List[str]:
+    models = [m.strip() for m in os.getenv(env_var, "").split(",") if m.strip()]
+    return models or [m.strip() for m in default.split(",")]
+
+
+def get_llm_attempts() -> List[Tuple[OpenAI, str, str]]:
+    """Builds the provider/model fallback chain as (client, model, label).
+
+    Groq is tried first (its model chain via GROQ_MODELS), then OpenRouter
+    (via OPENROUTER_MODELS). Only providers with a configured
+    API key are included.
+    """
+    attempts: List[Tuple[OpenAI, str, str]] = []
+
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key and groq_key != "your_groq_api_key_here":
+        client = OpenAI(base_url=GROQ_BASE_URL, api_key=groq_key)
+        for model in _env_models("GROQ_MODELS", GROQ_MODELS_DEFAULT):
+            attempts.append((client, model, f"groq/{model}"))
+
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if openrouter_key and openrouter_key != "your_openrouter_api_key_here":
+        client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=openrouter_key)
+        for model in _env_models("OPENROUTER_MODELS", OPENROUTER_MODELS_DEFAULT):
+            attempts.append((client, model, f"openrouter/{model}"))
+
+    return attempts
+
+
 def get_llm_client() -> Optional[OpenAI]:
-    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    if not api_key or api_key == "your_openrouter_api_key_here":
+    """Returns the primary client (Groq if configured, else OpenRouter).
+
+    Used by call sites only as an "is any LLM provider configured" check;
+    call_llm_json walks the full fallback chain itself.
+    """
+    attempts = get_llm_attempts()
+    return attempts[0][0] if attempts else None
+
+
+def _parse_json_reply(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Parses an LLM reply into a dict, tolerating markdown code fences."""
+    if not raw:
         return None
-    return OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=api_key,
-    )
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    try:
+        parsed = json.loads(text.strip())
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def call_llm_json(system_prompt: str, user_content: str, max_retries: int = 1) -> Optional[Dict[str, Any]]:
-    client = get_llm_client()
-    if not client:
+    attempts = get_llm_attempts()
+    if not attempts:
         return None
 
-    model = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-001")
+    for client, model, label in attempts:
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_content},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.2,
+                    max_tokens=2048,
+                )
+                raw = response.choices[0].message.content
+                result = _parse_json_reply(raw)
+                if result is not None:
+                    return result
+                raise ValueError("LLM reply was not a JSON object")
+            except Exception as e:
+                if attempt == max_retries:
+                    print(f"[Warning] LLM call failed ({label}, attempt {attempt + 1}/{max_retries + 1}): {e}")
+                    break  # move to the next model/provider in the chain
 
-    for attempt in range(max_retries + 1):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.2,
-            )
-            raw = response.choices[0].message.content
-            return json.loads(raw)
-        except Exception as e:
-            if attempt == max_retries:
-                print(f"[Warning] LLM call failed after {max_retries + 1} attempts: {e}")
-                return None
+    print("[Warning] All LLM providers in the fallback chain failed")
+    return None
 
 
 # --- Tool 1: parse_resume ---
@@ -275,12 +332,20 @@ def validate_tailored_facts(profile: Profile, tailored_output: Dict[str, Any]) -
     verified_companies = set(e.get("company", "").strip().lower() for e in (profile.experience_json or []))
 
     resume_changes = tailored_output.get("resume_changes", {})
+    if not isinstance(resume_changes, dict):
+        resume_changes = {}
     dropped_count = 0
 
     # 1. Validate highlighted skills
     orig_skills = resume_changes.get("highlighted_skills", [])
+    if not isinstance(orig_skills, list):
+        orig_skills = []
     valid_skills = []
     for s in orig_skills:
+        if not isinstance(s, str):
+            dropped_count += 1
+            print(f"[Warning] Dropped malformed skill entry {s!r} from tailored application.")
+            continue
         if s.strip().lower() in verified_skills:
             valid_skills.append(s)
         else:
@@ -290,11 +355,21 @@ def validate_tailored_facts(profile: Profile, tailored_output: Dict[str, Any]) -
 
     # 2. Validate projects
     orig_projects = resume_changes.get("reordered_projects", [])
+    if not isinstance(orig_projects, list):
+        orig_projects = []
     valid_projects = []
     for p in orig_projects:
-        title = p.get("title", "").strip().lower()
+        if not isinstance(p, dict):
+            dropped_count += 1
+            print(f"[Warning] Dropped malformed project entry {p!r} from tailored output.")
+            continue
+        title = str(p.get("title", "")).strip().lower()
         if any(vp in title or title in vp for vp in verified_projects):
-            p["technologies"] = [t for t in p.get("technologies", []) if t.strip().lower() in verified_skills]
+            techs = p.get("technologies", [])
+            if isinstance(techs, list):
+                p["technologies"] = [t for t in techs if isinstance(t, str) and t.strip().lower() in verified_skills]
+            else:
+                p["technologies"] = []
             valid_projects.append(p)
         else:
             dropped_count += 1
@@ -306,9 +381,15 @@ def validate_tailored_facts(profile: Profile, tailored_output: Dict[str, Any]) -
 
     # 3. Validate experience
     orig_exp = resume_changes.get("reordered_experience", [])
+    if not isinstance(orig_exp, list):
+        orig_exp = []
     valid_exp = []
     for e in orig_exp:
-        comp = e.get("company", "").strip().lower()
+        if not isinstance(e, dict):
+            dropped_count += 1
+            print(f"[Warning] Dropped malformed experience entry {e!r} from tailored output.")
+            continue
+        comp = str(e.get("company", "")).strip().lower()
         if any(vc in comp or comp in vc for vc in verified_companies):
             valid_exp.append(e)
         else:
