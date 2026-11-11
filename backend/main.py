@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 load_dotenv()
@@ -27,10 +28,12 @@ except Exception as exc:  # DB unreachable: keep serving, report via /api/health
 
 app = FastAPI(title="CareerPilot API", version="1.0.0")
 
-# CORS for React frontend
+# CORS for React frontend. In production set CORS_ORIGINS to the deployed
+# frontend origin(s); localhost defaults are kept for local development.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins or ["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,3 +80,23 @@ def serve_file(filename: str):
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(file_path)
+
+
+# --- Production static hosting: serve the built frontend from this same
+# origin so fetch('/api/...') works without a separate proxy. The dist/
+# folder only exists after `npm run build`; in dev the Vite server on
+# :5173 is used instead and these routes are never registered. ---
+FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+if os.path.isdir(FRONTEND_DIST):
+    assets_dir = os.path.join(FRONTEND_DIST, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = os.path.normpath(os.path.join(FRONTEND_DIST, full_path))
+        if candidate.startswith(FRONTEND_DIST) and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
