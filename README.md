@@ -23,8 +23,9 @@ pip install -r requirements.txt
 Create `.env` in the repo root (copy from `.env.example`):
 
 ```
-OPENROUTER_API_KEY=sk-or-v1-...   # from https://openrouter.ai/keys
-LLM_MODEL=anthropic/claude-3.5-sonnet
+GROQ_API_KEY=gsk_...                  # from https://console.groq.com/keys (primary)
+GROQ_MODELS=openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b
+OPENROUTER_API_KEY=sk-or-v1-...   # optional fallback, from https://openrouter.ai/keys
 DATABASE_URL=                      # leave empty for local SQLite
 ```
 
@@ -82,7 +83,8 @@ python -m backend.data.generate_jobs
   `POST /api/applications/{id}/approve` button can.
 - Tailored output is validated in code against the profile: invented skills, projects
   or employers are dropped and logged.
-- If the OpenRouter key is missing or a call fails, the app falls back to deterministic
+- If every provider/model in the fallback chain fails (Groq models first, then
+  OpenRouter models) or all keys are missing, the app falls back to deterministic
   code paths (heuristic resume parsing, code-computed fit bullets, fallback interview
   questions with heuristic scoring) and stays usable.
 
