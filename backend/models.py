@@ -59,7 +59,7 @@ class Application(Base):
     applied_at = Column(DateTime, nullable=True)
 
     job = relationship("Job", back_populates="applications")
-    reminders = relationship("Reminder", back_populates="application")
+    reminders = relationship("Reminder", back_populates="application", cascade="all, delete-orphan")
 
 
 class InterviewSession(Base):
@@ -71,7 +71,7 @@ class InterviewSession(Base):
     started_at = Column(DateTime, default=datetime.datetime.utcnow)
     summary = Column(Text, nullable=True)
 
-    turns = relationship("InterviewTurn", back_populates="session")
+    turns = relationship("InterviewTurn", back_populates="session", cascade="all, delete-orphan")
 
 
 class InterviewTurn(Base):
