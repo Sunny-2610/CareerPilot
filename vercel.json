@@ -1,9 +1,19 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "frontend",
+      "framework": "vite"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
       "destination": "https://careerpilot-lbct.onrender.com/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": { "service": "web" }
     }
   ]
 }
