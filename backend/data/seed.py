@@ -132,7 +132,7 @@ def seed_database(db) -> dict:
     demo_profile = Profile(
         name="Ananya Sharma",
         email="ananya.sharma@example.com",
-        education="B.Tech in Computer Science and Engineering, NITK (2021-2025), CGPA: 8.8/10",
+        education="B.Tech in Computer Science and Engineering, NITK (2022-2026), CGPA: 8.8/10",
         skills_json=[
             "Python", "FastAPI", "React", "TypeScript", "PostgreSQL",
             "Redis", "Docker", "Git", "SQL", "Linux", "Tailwind CSS",

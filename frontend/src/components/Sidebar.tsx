@@ -9,7 +9,7 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({
   studentName = "Ananya Sharma",
-  studentCollege = "B.Tech CSE '25"
+  studentCollege = "B.Tech CSE '26"
 }) => {
   const navItems = [
     { name: 'Today', path: '/', icon: Calendar },

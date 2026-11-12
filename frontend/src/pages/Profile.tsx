@@ -106,6 +106,7 @@ export const ProfilePage: React.FC = () => {
       const updated = await res.json()
       setProfile(updated)
       setFormData(updated)
+      window.dispatchEvent(new Event('profile:updated'))
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to upload and parse resume')
     } finally {
@@ -129,6 +130,7 @@ export const ProfilePage: React.FC = () => {
       const updated = await res.json()
       setProfile(updated)
       setEditSection(null)
+      window.dispatchEvent(new Event('profile:updated'))
     } catch (err: any) {
       setErrorMessage(err.message || 'Save failed')
     }
