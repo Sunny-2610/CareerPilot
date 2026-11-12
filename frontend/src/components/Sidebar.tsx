@@ -25,13 +25,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Brand & Navigation */}
       <div className="flex flex-col gap-4">
         <div className="px-1 pt-1 pb-2">
-          <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => navigate('/')}
+            title="Go to Today dashboard"
+            className="w-full flex items-center gap-2.5 rounded px-1 py-1 -mx-1 hover:bg-canvas transition-colors cursor-pointer"
+          >
             <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center shrink-0">
               <svg width="18" height="18" viewBox="0 0 32 32" fill="none" aria-hidden="true">
                 <path d="M7 15L26 6L17 25L15 17Z" fill="#FAF9F6" />
               </svg>
             </div>
-            <div className="flex flex-col min-w-0">
+            <div className="flex flex-col min-w-0 text-left">
               <span className="font-sans font-semibold text-[15px] text-ink tracking-tight leading-none">
                 CareerPilot
               </span>
@@ -39,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 Recruitment Ledger • {studentCollege}
               </p>
             </div>
-          </div>
+          </button>
         </div>
 
         <button
